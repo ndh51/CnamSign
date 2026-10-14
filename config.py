@@ -11,7 +11,7 @@ PIN_CODE = os.getenv("PIN_CODE") or os.getenv("CNAM_PIN") or ""
 # Configuration IMAP / Réseau
 IMAP_HOST = os.getenv("IMAP_HOST", "outlook.office365.com")
 IMAP_PORT = int(os.getenv("IMAP_PORT", "993"))
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "20"))
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "30"))
 OUTLOOK_FOLDER = os.getenv("OUTLOOK_FOLDER", "Emargements")
 
 # Options Playwright

@@ -17,10 +17,28 @@ CODE_PATTERNS = [
 ]
 
 BROWSER_PROFILE_DIR = os.path.abspath("browser_profile")
+PROCESSED_CODES_FILE = "processed_codes.txt"
 
 class MailWatcher:
     def __init__(self):
-        self.processed_codes: Set[str] = set()
+        self.processed_codes: Set[str] = self._load_processed_codes()
+
+    def _load_processed_codes(self) -> Set[str]:
+        if os.path.exists(PROCESSED_CODES_FILE):
+            try:
+                with open(PROCESSED_CODES_FILE, "r", encoding="utf-8") as f:
+                    return set(line.strip() for line in f if line.strip())
+            except Exception:
+                pass
+        return set()
+
+    def mark_as_processed(self, code: str):
+        self.processed_codes.add(code)
+        try:
+            with open(PROCESSED_CODES_FILE, "a", encoding="utf-8") as f:
+                f.write(f"{code}\n")
+        except Exception:
+            pass
 
     def _login_outlook(self, page: Page):
         """Authentifie la session sur Outlook Web via Microsoft et Le Cnam SSO."""
@@ -123,7 +141,7 @@ class MailWatcher:
                         code = match.group(1)
                         if code not in self.processed_codes:
                             logger.info(f"Nouveau code d'émargement détecté : {code}")
-                            self.processed_codes.add(code)
+                            self.mark_as_processed(code)
                             return code
 
                 return None

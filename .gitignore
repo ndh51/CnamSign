@@ -28,6 +28,7 @@ screenshots/
 logs/
 .playwright/
 browser_profile/
+processed_codes.txt
 *.json
 !requirements.txt
 
