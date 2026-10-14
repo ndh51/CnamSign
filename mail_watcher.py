@@ -1,0 +1,135 @@
+import logging
+import os
+import re
+import time
+from typing import Optional, Set
+from playwright.sync_api import sync_playwright, Page
+
+import config
+
+logger = logging.getLogger(__name__)
+
+CODE_PATTERNS = [
+    re.compile(r"code\s+de\s+session\s*(?:à\s+indiquer\s+)?(?:pour\s+émarger[^\d:]*)?:\s*(\d{6})", re.IGNORECASE),
+    re.compile(r"code\s+de\s+session[^\d:]*:\s*(\d{6})", re.IGNORECASE),
+    re.compile(r"émarger[^\d:]*:\s*(\d{6})", re.IGNORECASE),
+    re.compile(r"(\d{6})"),
+]
+
+BROWSER_PROFILE_DIR = os.path.abspath("browser_profile")
+
+class MailWatcher:
+    def __init__(self):
+        self.processed_codes: Set[str] = set()
+
+    def _login_outlook(self, page: Page):
+        """Authentifie la session sur Outlook Web via Microsoft et Le Cnam SSO."""
+        logger.info("Session expirée ou absente : authentification Microsoft / Le Cnam en cours...")
+        email_field = page.wait_for_selector('input[type="email"], input[name="loginfmt"]', timeout=30000)
+        email_field.fill(config.EMAIL)
+        page.locator('input[type="submit"], #idSIButton9').first.click()
+
+        logger.info("Attente de la redirection vers Le Cnam SSO...")
+        page.wait_for_url(lambda u: "idp.lecnam.net" in u, timeout=30000)
+
+        logger.info("Saisie des identifiants SSO Le Cnam...")
+        username_selectors = ['input[name="j_username"]', '#username', 'input[type="text"]']
+        password_selectors = ['input[name="j_password"]', '#password', 'input[type="password"]']
+        submit_selectors = ['button[type="submit"]', 'input[type="submit"]', 'button[name="_eventId_proceed"]']
+
+        for sel in username_selectors:
+            if page.locator(sel).first.is_visible():
+                page.locator(sel).first.fill(config.EMAIL)
+                break
+
+        for sel in password_selectors:
+            if page.locator(sel).first.is_visible():
+                page.locator(sel).first.fill(config.PASSWORD)
+                break
+
+        for sel in submit_selectors:
+            if page.locator(sel).first.is_visible():
+                page.locator(sel).first.click()
+                break
+
+        logger.info("Connexion SSO envoyée. Attente de la validation Microsoft...")
+        try:
+            stay_signed_btn = page.wait_for_selector('input[value="Oui"], #idSIButton9, button:has-text("Oui")', timeout=20000)
+            if stay_signed_btn:
+                stay_signed_btn.click()
+        except Exception:
+            pass
+
+        logger.info("Attente du chargement d'Outlook Web...")
+        page.wait_for_url(lambda u: "outlook.office.com/mail" in u or "outlook.office365.com/mail" in u, timeout=60000)
+        time.sleep(4)
+        logger.info("Session Outlook active et enregistrée dans le profil persistant !")
+
+    def check_for_code(self) -> Optional[str]:
+        """Vérifie le dossier Emargements et extrait le dernier code reçu avec cache persistant."""
+        with sync_playwright() as p:
+            # Utilisation d'un profil navigateur persistant pour conserver cache, cookies et tokens
+            context = p.chromium.launch_persistent_context(
+                user_data_dir=BROWSER_PROFILE_DIR,
+                headless=config.HEADLESS,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800}
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+
+            try:
+                page.goto("https://outlook.office.com/mail/", timeout=60000)
+
+                # Si le cache a expiré ou première visite, on s'authentifie
+                needs_login = False
+                try:
+                    login_field = page.wait_for_selector('input[type="email"], input[name="loginfmt"]', timeout=5000)
+                    if login_field:
+                        needs_login = True
+                except Exception:
+                    pass
+
+                if needs_login:
+                    self._login_outlook(page)
+
+                # Accès direct au dossier d'émargement
+                folder_name = config.OUTLOOK_FOLDER
+                folder_sel = f'span[title="{folder_name}"], div[title="{folder_name}"], span:text-is("{folder_name}"), [aria-label*="{folder_name}"]'
+                folder = page.locator(folder_sel).first
+                if folder.is_visible():
+                    folder.click()
+                    time.sleep(2)
+
+                # Vérifier le premier mail de la liste
+                first_mail = page.locator('div[role="listbox"] div[role="option"]').first
+                if not first_mail.is_visible():
+                    logger.debug("Aucun mail dans le dossier Emargements.")
+                    return None
+
+                first_mail.click()
+                time.sleep(1.5)
+
+                # Extraire le corps du message
+                body_el = page.locator('div[aria-label="Corps du message"], div[role="document"], .ReadingPaneContainer').first
+                if not body_el.is_visible():
+                    return None
+
+                body_text = body_el.inner_text()
+
+                for pattern in CODE_PATTERNS:
+                    match = pattern.search(body_text)
+                    if match:
+                        code = match.group(1)
+                        if code not in self.processed_codes:
+                            logger.info(f"Nouveau code d'émargement détecté : {code}")
+                            self.processed_codes.add(code)
+                            return code
+
+                return None
+
+            except Exception as e:
+                logger.error(f"Erreur lors de la vérification des mails Outlook Web : {e}")
+                return None
+            finally:
+                context.close()
