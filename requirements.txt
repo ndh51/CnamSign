@@ -1,0 +1,4 @@
+playwright==1.48.0
+python-dotenv==1.0.1
+pytesseract==0.3.13
+Pillow==10.4.0
