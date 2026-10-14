@@ -13,6 +13,7 @@ import config
 logger = logging.getLogger(__name__)
 
 URL_EMARGEMENT = "https://cnamsigne.lecnam.net/emargement/Emargement.aspx"
+BROWSER_PROFILE_DIR = os.path.abspath("browser_profile")
 
 class CnamSigner:
     def __init__(self):
@@ -181,8 +182,6 @@ class CnamSigner:
             valider_final.click()
             logger.info("Validation finale effectuée.")
             time.sleep(2)
-
-BROWSER_PROFILE_DIR = os.path.abspath("browser_profile")
 
     def sign(self, session_code: str) -> bool:
         """Exécute le parcours complet d'émargement."""
