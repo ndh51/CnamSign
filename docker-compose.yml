@@ -1,0 +1,10 @@
+services:
+  cnamsign:
+    build: .
+    container_name: cnamsign
+    restart: unless-stopped
+    env_file:
+      - .env
+    shm_size: 1gb
+    volumes:
+      - .:/app
