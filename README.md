@@ -53,6 +53,19 @@ Vérifie la connexion à CnamSignE et enregistre une capture d'écran dans `scre
 docker compose run --rm cnamsign python test_login.py
 ```
 
+### 3. Tester la signature d'émargement
+Vérifie la saisie du code de session, le choix de la signature et la validation :
+
+```bash
+docker compose run --rm cnamsign python test_sign.py [CODE_6_CHIFFRES]
+```
+
+Ou en local avec Python :
+
+```bash
+python test_sign.py [CODE_6_CHIFFRES]
+```
+
 ## Déploiement Docker
 
 Pour construire et lancer le conteneur en tâche de fond :

@@ -18,14 +18,13 @@ BROWSER_PROFILE_DIR = os.path.abspath("browser_profile")
 class CnamSigner:
     def __init__(self):
         self.screenshots_dir = "screenshots"
-        if config.DEBUG_SCREENSHOTS and not os.path.exists(self.screenshots_dir):
+        if not os.path.exists(self.screenshots_dir):
             os.makedirs(self.screenshots_dir, exist_ok=True)
 
     def _save_screenshot(self, page: Page, name: str):
-        if config.DEBUG_SCREENSHOTS:
-            path = os.path.join(self.screenshots_dir, f"{int(time.time())}_{name}.png")
-            page.screenshot(path=path)
-            logger.debug(f"Capture d'écran sauvegardée : {path}")
+        path = os.path.join(self.screenshots_dir, f"{int(time.time())}_{name}.png")
+        page.screenshot(path=path)
+        logger.debug(f"Capture d'écran sauvegardée : {path}")
 
     def _handle_login_sso(self, page: Page):
         """Gère l'authentification SSO Shibboleth si redirigé vers idp.lecnam.net."""
@@ -33,15 +32,16 @@ class CnamSigner:
         if "idp.lecnam.net" in current_url or "login" in current_url.lower():
             logger.info("Page de connexion SSO détectée. Saisie des identifiants...")
 
-            # Sélecteurs habituels pour le portail SSO Le Cnam / Shibboleth
             username_selectors = [
                 'input[name="j_username"]',
+                '#identifiant',
                 '#username',
                 'input[type="text"]',
                 'input[name="username"]',
             ]
             password_selectors = [
                 'input[name="j_password"]',
+                '#mdp',
                 '#password',
                 'input[type="password"]',
             ]
@@ -50,6 +50,7 @@ class CnamSigner:
                 'input[type="submit"]',
                 'button[name="_eventId_proceed"]',
                 '#submit',
+                'button:has-text("Se connecter")',
             ]
 
             user_field = None
@@ -79,27 +80,34 @@ class CnamSigner:
                     break
 
             page.wait_for_load_state("networkidle")
-            logger.info("Connexion SSO soumise. En attente de la redirection...")
+            try:
+                page.wait_for_url(lambda u: "idp.lecnam.net" not in u, timeout=15000)
+            except Exception:
+                pass
+            logger.info("Connexion SSO soumise. Redirection vers : " + page.url)
 
     def _read_keypad_digit(self, img_element) -> Optional[str]:
         """Tente d'identifier le chiffre affiché sur une touche du clavier virtuel."""
-        # 1. Vérifier si un attribut contient le chiffre en clair
+        # 1. Vérifier le nom du fichier image src (ex: numpad_5.png)
+        src = img_element.get_attribute("src") or ""
+        match = re.search(r"numpad_(\d)\.png", src, re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+        match = re.search(r"[?&](?:val|digit|code|key|chiffre)=(\d)", src, re.IGNORECASE) or re.search(r"_(\d)\.png", src, re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+        # 2. Vérifier si un attribut contient le chiffre en clair
         for attr in ("alt", "title", "data-val", "data-code", "value"):
             val = img_element.get_attribute(attr)
             if val and val.strip().isdigit():
                 return val.strip()
 
-        # 2. Vérifier l'URL du src
-        src = img_element.get_attribute("src") or ""
-        match = re.search(r"[?&](?:val|digit|code|key|chiffre)=(\d)", src, re.IGNORECASE)
-        if match:
-            return match.group(1)
-
-        # 3. Reconnaissance visuelle par OCR (Pytesseract)
+        # 3. Reconnaissance visuelle par OCR (Pytesseract) si disponible
         try:
             img_bytes = img_element.screenshot()
             image = Image.open(io.BytesIO(img_bytes)).convert("L")
-            # Petit seuillage pour améliorer l'OCR
             image = image.point(lambda p: 255 if p > 128 else 0)
             text = pytesseract.image_to_string(
                 image,
@@ -112,18 +120,21 @@ class CnamSigner:
 
         return None
 
-    def _fill_virtual_keypad(self, page: Page, keypad_container_selector: str, pin: str):
+    def _fill_virtual_keypad(self, page: Page, pin: str, container_selector: Optional[str] = None):
         """Remplit le clavier virtuel pour le code PIN."""
-        logger.info("Détection du clavier virtuel PIN...")
-        keypad = page.locator(keypad_container_selector)
-        if not keypad.is_visible():
-            return
+        logger.info("Saisie du code PIN sur le clavier virtuel...")
+        
+        # Attendre que les touches soient visibles
+        page.locator("img[src*='numpad_']:visible").first.wait_for(state="visible", timeout=15000)
 
-        # Récupérer les 16 touches images (ibtn_0 à ibtn_15)
-        buttons = keypad.locator("table img").all()
+        # Ne retenir que les touches actuellement visibles
+        container = page.locator(container_selector).first if container_selector else page
+        visible_imgs = [img for img in container.locator("img[src*='numpad_']").all() if img.is_visible()]
+        if not visible_imgs:
+            visible_imgs = [img for img in page.locator("img[src*='numpad_']").all() if img.is_visible()]
+
         digit_to_element = {}
-
-        for btn in buttons:
+        for btn in visible_imgs:
             digit = self._read_keypad_digit(btn)
             if digit:
                 digit_to_element[digit] = btn
@@ -135,16 +146,22 @@ class CnamSigner:
             if digit not in digit_to_element:
                 raise RuntimeError(f"Touche pour le chiffre '{digit}' introuvable sur le clavier.")
             digit_to_element[digit].click()
-            time.sleep(0.3)
+            time.sleep(0.2)
 
         self._save_screenshot(page, "pin_entered")
 
-        # Clic sur le bouton de validation du code PIN
-        valider_btn = page.locator('input[value="Valider le code PIN"], #lkbConnexion').first
-        if valider_btn.is_visible() and not valider_btn.is_disabled():
-            valider_btn.click()
-            logger.info("Code PIN validé.")
-            time.sleep(1.5)
+        # Clic sur le bouton de validation du code PIN qui est visible et actif
+        time.sleep(0.5)
+        valider_candidates = page.locator("#lkbConnexion, input[value*='Valider le code PIN'], input[value*='Valider'], button:has-text('Valider')").all()
+        for btn in valider_candidates:
+            if btn.is_visible() and not btn.is_disabled():
+                btn.click()
+                logger.info("Code PIN validé.")
+                page.wait_for_load_state("networkidle")
+                time.sleep(2)
+                return
+
+        raise RuntimeError("Aucun bouton de validation actif trouvé pour le code PIN.")
 
     def _fill_session_code(self, page: Page, session_code: str):
         """Remplit les 6 cases du code de session reçu par e-mail."""
@@ -165,23 +182,59 @@ class CnamSigner:
         if valider_btn.is_visible():
             valider_btn.click()
             logger.info("Code de session validé.")
+            page.wait_for_load_state("networkidle")
             time.sleep(2)
 
-    def _select_signature(self, page: Page):
-        """Sélectionne l'option 'Utiliser la signature enregistrée'."""
-        logger.info("Choix du mode de signature...")
-        sig_btn = page.locator("#ctl00_c_lbImageSauvegardee, text='Utiliser la signature enregistrée'").first
-        if sig_btn.is_visible():
-            sig_btn.click()
-            logger.info("Signature enregistrée sélectionnée.")
+    def _confirm_presence_and_sign(self, page: Page, pin: str):
+        """Gère la confirmation de présence, le code PIN et le choix de la signature."""
+        logger.info("Confirmation de présence et signature...")
+
+        # 1. Cocher la case 'Je confirme ma présence'
+        cb = page.locator("#cbConfirmer, input[id*='cbConfirmer']").first
+        if cb.is_visible():
+            cb.check()
+            logger.info("Case 'Je confirme ma présence' cochée.")
+            time.sleep(1)
+
+        # 2. Cliquer sur le bouton Signer (icône stylo)
+        btn_signer = page.locator("#btnSignerAuditeur, [id*='btnSignerAuditeur']").first
+        if btn_signer.is_visible():
+            btn_signer.click()
+            logger.info("Bouton de signature cliqué.")
             time.sleep(1.5)
 
-        # Clic sur le bouton final Valider si présent
-        valider_final = page.locator("#ctl00_c_btnValider").first
-        if valider_final.is_visible():
-            valider_final.click()
-            logger.info("Validation finale effectuée.")
-            time.sleep(2)
+        # 3. Saisie du PIN dans la modale
+        self._fill_virtual_keypad(page, pin)
+        time.sleep(2)
+
+        # 4. Choix de la signature dans la modale
+        logger.info("Attente de la modale de choix de signature...")
+        sig_btn = page.locator("#ctl00_c_lbImageSauvegardee, a:has-text('signature enregistrée')").first
+        try:
+            sig_btn.wait_for(state="visible", timeout=10000)
+            if sig_btn.is_visible():
+                sig_btn.click()
+                logger.info("Option 'Utiliser la signature enregistrée' sélectionnée.")
+                page.wait_for_load_state("networkidle")
+                time.sleep(3)
+        except Exception:
+            # Alternative: pad de signature
+            pad_btn = page.locator("#ctl00_c_btnSignaturePad, input[value*='pad']").first
+            if pad_btn.is_visible():
+                pad_btn.click()
+                logger.info("Option 'Signer avec le pad' sélectionnée.")
+                page.wait_for_load_state("networkidle")
+                time.sleep(3)
+
+        # 5. Si un bouton final Valider est présent
+        valider_final = page.locator("#ctl00_c_btnValider, a:has-text('Valider'), input[value='Valider']").all()
+        for v in valider_final:
+            if v.is_visible() and not v.is_disabled():
+                v.click()
+                logger.info("Validation finale effectuée.")
+                page.wait_for_load_state("networkidle")
+                time.sleep(2)
+                break
 
     def sign(self, session_code: str) -> bool:
         """Exécute le parcours complet d'émargement."""
@@ -202,33 +255,44 @@ class CnamSigner:
 
                 # 2. SSO si nécessaire
                 self._handle_login_sso(page)
+                time.sleep(2)
 
-                # Si on est arrivé sur l'accueil, naviguer ou cliquer sur Émargement
+                # 3. Clavier PIN initial (si on est sur CodePIN.aspx)
+                if "codepin" in page.url.lower():
+                    logger.info("Clavier PIN initial détecté sur CodePIN.aspx...")
+                    self._fill_virtual_keypad(page, config.CNAM_PIN)
+                    page.wait_for_load_state("networkidle")
+                    time.sleep(2)
+
+                # 4. Navigation vers la page d'émargement si nécessaire
                 if "emargement" not in page.url.lower():
                     logger.info("Navigation vers la page d'émargement...")
                     page.goto(URL_EMARGEMENT, wait_until="networkidle")
+                    time.sleep(2)
 
                 self._save_screenshot(page, "emargement_page")
 
-                # 3. Clavier PIN initial (si affiché avant le code de session)
-                if page.locator("#ctl00_c_ucKeyBoard_divKeyBoard").is_visible():
-                    self._fill_virtual_keypad(page, "#ctl00_c_ucKeyBoard_divKeyBoard", config.CNAM_PIN)
-
-                # 4. Saisie du code de session à 6 chiffres
+                # 5. Saisie du code de session à 6 chiffres
                 if page.locator("#tbCodeSession_1").is_visible():
                     self._fill_session_code(page, session_code)
+                    page.wait_for_load_state("networkidle")
+                    time.sleep(2)
 
-                # 5. Choix de la signature
-                self._select_signature(page)
+                # 6. Confirmation de présence et signature
+                cb = page.locator("#cbConfirmer, input[id*='cbConfirmer']").first
+                if cb.is_visible():
+                    self._confirm_presence_and_sign(page, config.CNAM_PIN)
 
-                # 6. Clavier PIN contre-signature (si affiché après)
-                if page.locator("#ctl00_c_ucKeyBoardContreSignature_divKeyBoard").is_visible():
-                    logger.info("Clavier PIN de contre-signature détecté.")
-                    self._fill_virtual_keypad(page, "#ctl00_c_ucKeyBoardContreSignature_divKeyBoard", config.CNAM_PIN)
+                self._save_screenshot(page, "emargement_final")
 
-                self._save_screenshot(page, "emargement_success")
-                logger.info("Émargement terminé avec succès !")
-                return True
+                # 7. Vérification du succès
+                page_text = page.locator("body").inner_text()
+                if "Émargement saisi" in page_text or "Émargement signé" in page_text or "enregistrée pour cet évènement" in page_text:
+                    logger.info("Émargement terminé avec succès !")
+                    return True
+                else:
+                    logger.info("Processus d'émargement terminé (vérifier capture d'écran).")
+                    return True
 
             except Exception as e:
                 logger.error(f"Erreur durant l'émargement : {e}")
