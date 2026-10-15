@@ -3,6 +3,8 @@ import sys
 import re
 import logging
 
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import config
 from signer import CnamSigner
 from mail_watcher import MailWatcher, PROCESSED_CODES_FILE

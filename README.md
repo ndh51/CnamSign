@@ -51,33 +51,33 @@ OUTLOOK_FOLDER=Emargements
 
 ## Tests préalables
 
-Avant de lancer le démon en continu, deux scripts permettent de tester chaque étape indépendamment.
+Avant de lancer le démon en continu, des scripts situés dans `tests/` permettent de tester chaque étape indépendamment.
 
 ### 1. Tester la lecture du mail
 Vérifie la connexion à Outlook Web, l'accès au dossier et l'extraction du dernier code à 6 chiffres :
 
 ```bash
-docker compose run --rm cnamsign python test_mail.py
+docker compose run --rm cnamsign python tests/test_mail.py
 ```
 
 ### 2. Tester la connexion SSO
 Vérifie la connexion à CnamSignE et enregistre une capture d'écran dans `screenshots/test_login_result.png` :
 
 ```bash
-docker compose run --rm cnamsign python test_login.py
+docker compose run --rm cnamsign python tests/test_login.py
 ```
 
 ### 3. Tester la signature d'émargement
 Vérifie la saisie du code de session, le choix de la signature et la validation :
 
 ```bash
-docker compose run --rm cnamsign python test_sign.py [CODE_6_CHIFFRES]
+docker compose run --rm cnamsign python tests/test_sign.py [CODE_6_CHIFFRES]
 ```
 
 Ou en local avec Python :
 
 ```bash
-python test_sign.py [CODE_6_CHIFFRES]
+python tests/test_sign.py [CODE_6_CHIFFRES]
 ```
 
 ## Déploiement Docker
