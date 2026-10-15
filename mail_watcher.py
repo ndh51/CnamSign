@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import time
+from datetime import datetime
 from typing import Optional, Set
 from playwright.sync_api import sync_playwright, Page
 
@@ -32,11 +33,28 @@ class MailWatcher:
                 pass
         return set()
 
-    def mark_as_processed(self, code: str):
-        self.processed_codes.add(code)
+    @staticmethod
+    def extract_date(text: str) -> str:
+        """Extrait la date du texte si présente (ex: 15/10/2026), sinon retourne la date du jour (YYYY-MM-DD)."""
+        m = re.search(r"\b(\d{2})[/.-](\d{2})[/.-](\d{4})\b", text)
+        if m:
+            day, month, year = m.groups()
+            return f"{year}-{month}-{day}"
+        return datetime.now().strftime("%Y-%m-%d")
+
+    def is_processed(self, code: str, date_str: str) -> bool:
+        """Vérifie si la combinaison date+code (ou le code seul) a déjà été traitée."""
+        entry = f"{date_str}:{code}"
+        return entry in self.processed_codes or code in self.processed_codes
+
+    def mark_as_processed(self, code: str, date_str: Optional[str] = None):
+        """Enregistre le couple date+code dans l'historique."""
+        d = date_str or datetime.now().strftime("%Y-%m-%d")
+        entry = f"{d}:{code}"
+        self.processed_codes.add(entry)
         try:
             with open(PROCESSED_CODES_FILE, "a", encoding="utf-8") as f:
-                f.write(f"{code}\n")
+                f.write(f"{entry}\n")
         except Exception:
             pass
 
@@ -134,14 +152,15 @@ class MailWatcher:
                     return None
 
                 body_text = body_el.inner_text()
+                email_date = self.extract_date(body_text)
 
                 for pattern in CODE_PATTERNS:
                     match = pattern.search(body_text)
                     if match:
                         code = match.group(1)
-                        if code not in self.processed_codes:
-                            logger.info(f"Nouveau code d'émargement détecté : {code}")
-                            self.mark_as_processed(code)
+                        if not self.is_processed(code, email_date):
+                            logger.info(f"Nouveau code d'émargement détecté pour le {email_date} : {code}")
+                            self.mark_as_processed(code, email_date)
                             return code
 
                 return None

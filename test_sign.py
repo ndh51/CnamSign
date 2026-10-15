@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import logging
 
 import config
@@ -25,7 +26,12 @@ def test_sign():
         # Tenter de récupérer depuis les codes récents ou depuis la boîte
         if os.path.exists(PROCESSED_CODES_FILE):
             with open(PROCESSED_CODES_FILE, "r", encoding="utf-8") as f:
-                codes = [line.strip() for line in f if line.strip()]
+                codes = []
+                for line in f:
+                    line = line.strip()
+                    m = re.search(r"(\d{6})", line)
+                    if m:
+                        codes.append(m.group(1))
                 if codes:
                     code = codes[-1]
                     print(f"[INFO] Dernier code détecté dans {PROCESSED_CODES_FILE} : {code}")
