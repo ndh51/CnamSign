@@ -285,13 +285,20 @@ class CnamSigner:
                     page.wait_for_load_state("networkidle")
                     time.sleep(2)
 
-                # Vérifier si CnamSignE signale une erreur (ex: code erroné, session expirée)
-                error_el = page.locator(".alert-danger:visible, [id*='lblErreur']:visible, [id*='MessageErreur']:visible").first
-                if error_el.is_visible():
-                    err_msg = error_el.inner_text().strip()
-                    logger.error(f"Erreur signalée par CnamSignE pour le code {session_code} : {err_msg}")
+                # Vérifier si CnamSignE signale une erreur (ex: code erroné, session inexistante ou expirée)
+                page_text = page.locator("body").inner_text()
+                if "Aucune session" in page_text or "code saisi est erroné" in page_text:
+                    logger.error(f"Erreur CnamSignE pour le code {session_code} : Aucune session d'émargement active trouvée.")
                     self._save_screenshot(page, "code_session_error")
                     return False
+
+                error_el = page.locator(".alert-danger:visible, [id*='lblErreur']:visible, [id*='MessageErreur']:visible, .toast:visible, [role='alert']:visible").first
+                if error_el.is_visible():
+                    err_msg = error_el.inner_text().strip()
+                    if err_msg:
+                        logger.error(f"Erreur signalée par CnamSignE pour le code {session_code} : {err_msg}")
+                        self._save_screenshot(page, "code_session_error")
+                        return False
 
                 # 6. Confirmation de présence et signature
                 cb = page.locator("#cbConfirmer, input[id*='cbConfirmer']").first
@@ -300,7 +307,7 @@ class CnamSigner:
                 else:
                     # Si ni case de présence ni message de succès, la session n'est pas ouverte
                     page_text = page.locator("body").inner_text()
-                    if "Émargement saisi" not in page_text and "Émargement signé" not in page_text:
+                    if "Émargement saisi" not in page_text and "Émargement signé" not in page_text and "déjà émargé" not in page_text.lower():
                         logger.error("Session non accessible ou code inactif.")
                         self._save_screenshot(page, "session_inaccessible")
                         return False
@@ -309,7 +316,7 @@ class CnamSigner:
 
                 # 7. Vérification stricte du succès
                 page_text = page.locator("body").inner_text()
-                if "Émargement saisi" in page_text or "Émargement signé" in page_text or "enregistrée pour cet évènement" in page_text:
+                if "Émargement saisi" in page_text or "Émargement signé" in page_text or "enregistrée pour cet évènement" in page_text or "déjà émargé" in page_text.lower():
                     logger.info("Émargement terminé avec succès !")
                     return True
                 else:

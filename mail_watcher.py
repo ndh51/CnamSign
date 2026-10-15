@@ -2,7 +2,7 @@ import logging
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Set
 from playwright.sync_api import sync_playwright, Page
 
@@ -35,13 +35,48 @@ class MailWatcher:
         return set()
 
     @staticmethod
-    def extract_date(text: str) -> str:
-        """Extrait la date du texte si présente (ex: 15/10/2026), sinon retourne la date du jour (YYYY-MM-DD)."""
-        m = re.search(r"\b(\d{2})[/.-](\d{2})[/.-](\d{4})\b", text)
+    def extract_date(text: str = "", item_text: str = "") -> str:
+        """
+        Extrait la date (format YYYY-MM-DD) de l'e-mail à partir de l'en-tête, du corps ou de l'élément de liste.
+        Si la date est antérieure à aujourd'hui (mention de jour antérieur, date passée),
+        retourne cette date réelle. Si c'est un mail reçu aujourd'hui, retourne la date du jour.
+        """
+        today = datetime.now().date()
+        today_str = today.strftime("%Y-%m-%d")
+
+        combined = f"{text} {item_text}"
+
+        # 1. Date complète DD/MM/YYYY dans le volet ou la liste (ex: 15/10/2026, 14/10/2026)
+        m = re.search(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b", combined)
         if m:
-            day, month, year = m.groups()
-            return f"{year}-{month}-{day}"
-        return datetime.now().strftime("%Y-%m-%d")
+            day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            try:
+                d = datetime(year, month, day).date()
+                return d.strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+
+        # 2. Date courte DD/MM avec année courante implicite
+        m = re.search(r"\b(\d{1,2})[/.-](\d{1,2})\b", item_text)
+        if m:
+            day, month = int(m.group(1)), int(m.group(2))
+            try:
+                d = datetime(today.year, month, day).date()
+                return d.strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+
+        # 3. Mention explicite d'un jour passé dans l'élément de liste
+        if re.search(r"\b(hier|yesterday)\b", combined, re.IGNORECASE):
+            return (today - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # 4. Abréviation de jour de semaine (ex: 'Mer 16:58', 'Mar 09:33')
+        # Dans Outlook Web, les e-mails reçus aujourd'hui affichent uniquement l'heure (ex: '09:37').
+        # Une mention de jour (Lun, Mar, Mer, Jeu, Ven, Sam, Dim) indique un e-mail antérieur.
+        if re.search(r"\b(lun|mar|mer|jeu|ven|sam|dim)\b", item_text, re.IGNORECASE):
+            return (today - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        return today_str
 
     def is_processed(self, code: str, date_str: str) -> bool:
         """Vérifie si la combinaison date+code (ou le code seul) a déjà été traitée."""
@@ -144,31 +179,47 @@ class MailWatcher:
                     logger.debug("Aucun mail dans le dossier Emargements.")
                     return None
 
+                today_str = datetime.now().strftime("%Y-%m-%d")
+
                 for idx, mail_item in enumerate(mails):
                     try:
                         if not mail_item.is_visible():
                             continue
+
+                        item_text = mail_item.inner_text().replace("\n", " ")
                         mail_item.click()
                         time.sleep(1)
 
-                        # Extraire le corps du message
-                        body_el = page.locator('div[aria-label="Corps du message"], div[role="document"], .ReadingPaneContainer').first
-                        if not body_el.is_visible():
-                            continue
+                        # Extraire le conteneur complet de lecture (entête + corps)
+                        pane_el = page.locator('.ReadingPaneContainer, div[role="main"]').first
+                        pane_text = pane_el.inner_text() if pane_el.is_visible() else ""
 
-                        body_text = body_el.inner_text()
-                        email_date = self.extract_date(body_text)
+                        # Corps du message pour la recherche de code
+                        body_el = page.locator('div[aria-label="Corps du message"], div[role="document"]').first
+                        body_text = body_el.inner_text() if body_el.is_visible() else pane_text
+
+                        email_date = self.extract_date(pane_text, item_text)
 
                         for pattern in CODE_PATTERNS:
                             match = pattern.search(body_text)
                             if match:
                                 code = match.group(1)
+
+                                # Si la date du mail est antérieure à aujourd'hui, on ignore le code
+                                if email_date < today_str:
+                                    logger.info(
+                                        f"Code {code} du {email_date} (mail #{idx+1}) ignoré car antérieur à aujourd'hui ({today_str})."
+                                    )
+                                    self.mark_as_processed(code, email_date)
+                                    break
+
                                 if not self.is_processed(code, email_date):
                                     logger.info(f"Nouveau code d'émargement détecté pour le {email_date} : {code} (mail #{idx+1})")
                                     self.last_detected_date = email_date
                                     if auto_mark:
                                         self.mark_as_processed(code, email_date)
                                     return code
+                                break
                     except Exception as err:
                         logger.debug(f"Erreur lors de la lecture du mail #{idx+1} : {err}")
                         continue
