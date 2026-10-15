@@ -1,0 +1,10 @@
+.git
+.env
+browser_profile/
+screenshots/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+processed_codes.txt
