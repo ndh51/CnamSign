@@ -2,7 +2,9 @@
 
 Automatisation de l'émargement sur la plateforme CnamSignE à partir des codes reçus par e-mail sur Outlook Le Cnam.
 
-## Prérequis Outlook
+## Prérequis
+
+### 1. Boîte de réception Outlook
 
 Dans Outlook Web (outlook.office.com) :
 
@@ -12,6 +14,18 @@ Dans Outlook Web (outlook.office.com) :
    - Action : déplacer le message vers le dossier `Emargements`
 
 Si un autre nom de dossier est utilisé, il suffit de le renseigner dans la variable `OUTLOOK_FOLDER` du fichier `.env`.
+
+### 2. Plateforme CnamSignE
+
+Sur la plateforme CnamSignE (cnamsigne.lecnam.net) :
+
+1. Se connecter avec vos identifiants Le Cnam et saisir votre code PIN.
+2. Enregistrer au préalable votre signature manuscrite :
+   - Cliquer sur votre nom en haut à droite pour ouvrir le menu utilisateur.
+   - Sélectionner **Signature enregistrée**.
+   - Tracer et sauvegarder votre signature.
+
+Cette signature sera automatiquement réutilisée par le script lors de la validation (*« Utiliser la signature enregistrée »*).
 
 ## Configuration
 
