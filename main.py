@@ -9,7 +9,7 @@ from signer import CnamSigner
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+    datefmt="%H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("cnamsign")
@@ -33,7 +33,8 @@ def main():
         try:
             code = watcher.check_for_code(auto_mark=False)
             if code:
-                logger.info(f"==> Nouveau code reçu ({watcher.last_detected_date}) : {code}")
+                logger.info(f"==> Nouveau code trouvé ({watcher.last_detected_date}) : {code}")
+                logger.info("==> Lancement du protocole de signature...")
                 success = signer.sign(code)
                 if success:
                     logger.info(f"==> Émargement réussi pour le code {code}")
@@ -54,6 +55,8 @@ def main():
                             f"==> Échec de l'émargement pour le code {code} "
                             f"(tentative {attempts}/{MAX_RETRIES}) - nouvelle tentative au prochain cycle"
                         )
+            else:
+                logger.info("Pas de nouveau code.")
 
             time.sleep(config.POLL_INTERVAL)
         except KeyboardInterrupt:

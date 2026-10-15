@@ -87,6 +87,8 @@ class MailWatcher:
         """Enregistre le couple date+code dans l'historique."""
         d = date_str or datetime.now().strftime("%Y-%m-%d")
         entry = f"{d}:{code}"
+        if entry in self.processed_codes:
+            return
         self.processed_codes.add(entry)
         try:
             with open(PROCESSED_CODES_FILE, "a", encoding="utf-8") as f:
@@ -205,21 +207,23 @@ class MailWatcher:
                             if match:
                                 code = match.group(1)
 
-                                # Si la date du mail est antérieure à aujourd'hui, on ignore le code
+                                # Si déjà traité, passer au suivant
+                                if self.is_processed(code, email_date):
+                                    break
+
+                                # Si la date du mail est antérieure à aujourd'hui, on ignore discrètement
                                 if email_date < today_str:
-                                    logger.info(
+                                    logger.debug(
                                         f"Code {code} du {email_date} (mail #{idx+1}) ignoré car antérieur à aujourd'hui ({today_str})."
                                     )
                                     self.mark_as_processed(code, email_date)
                                     break
 
-                                if not self.is_processed(code, email_date):
-                                    logger.info(f"Nouveau code d'émargement détecté pour le {email_date} : {code} (mail #{idx+1})")
-                                    self.last_detected_date = email_date
-                                    if auto_mark:
-                                        self.mark_as_processed(code, email_date)
-                                    return code
-                                break
+                                logger.debug(f"Nouveau code d'émargement détecté pour le {email_date} : {code}")
+                                self.last_detected_date = email_date
+                                if auto_mark:
+                                    self.mark_as_processed(code, email_date)
+                                return code
                     except Exception as err:
                         logger.debug(f"Erreur lors de la lecture du mail #{idx+1} : {err}")
                         continue

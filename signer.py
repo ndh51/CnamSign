@@ -219,20 +219,35 @@ class CnamSigner:
         logger.info("Vérification de la modale de choix de signature...")
         sig_btn = page.locator("#ctl00_c_lbImageSauvegardee, a:has-text('signature enregistrée')").first
         try:
-            sig_btn.wait_for(state="visible", timeout=10000)
+            sig_btn.wait_for(state="visible", timeout=12000)
             if sig_btn.is_visible():
                 sig_btn.click()
                 logger.info("Option 'Utiliser la signature enregistrée' sélectionnée.")
                 page.wait_for_load_state("networkidle")
                 time.sleep(3)
+                return
         except Exception:
-            # Alternative: pad de signature si aucune signature sauvegardée
-            pad_btn = page.locator("#ctl00_c_btnSignaturePad, input[value*='pad']").first
-            if pad_btn.is_visible():
-                pad_btn.click()
-                logger.info("Option 'Signer avec le pad' sélectionnée.")
-                page.wait_for_load_state("networkidle")
-                time.sleep(3)
+            pass
+
+        # Alternative: pad de signature si aucune signature sauvegardée
+        pad_btn = page.locator("#ctl00_c_btnSignaturePad, input[value*='pad']").first
+        if pad_btn.is_visible():
+            pad_btn.click()
+            logger.info("Option 'Signer avec le pad' sélectionnée.")
+            page.wait_for_load_state("networkidle")
+            time.sleep(2)
+            try:
+                canvas = page.locator("canvas, #signature-pad canvas").first
+                if canvas.is_visible():
+                    box = canvas.bounding_box()
+                    if box:
+                        page.mouse.move(box["x"] + box["width"] * 0.2, box["y"] + box["height"] * 0.5)
+                        page.mouse.down()
+                        page.mouse.move(box["x"] + box["width"] * 0.8, box["y"] + box["height"] * 0.5, steps=5)
+                        page.mouse.up()
+                        time.sleep(1)
+            except Exception:
+                pass
 
         # 5. Éventuelle contre-signature par code PIN (PIN #3)
         self._handle_pin_if_present(page, pin, timeout_ms=3000)
@@ -316,12 +331,18 @@ class CnamSigner:
 
                 # 7. Vérification stricte du succès
                 page_text = page.locator("body").inner_text()
+                if "Aucune signature" in page_text or "veuillez dessiner" in page_text:
+                    logger.error("Échec de l'émargement : CnamSignE signale qu'aucune signature n'a été détectée.")
+                    self._save_screenshot(page, "signature_non_detectee")
+                    return False
+
                 if "Émargement saisi" in page_text or "Émargement signé" in page_text or "enregistrée pour cet évènement" in page_text or "déjà émargé" in page_text.lower():
                     logger.info("Émargement terminé avec succès !")
                     return True
                 else:
-                    logger.warning("Émargement soumis mais confirmation textuelle non repérée. Consultez screenshots/emargement_final.png")
-                    return True
+                    logger.error("Échec de l'émargement : aucune confirmation textuelle de signature reçue.")
+                    self._save_screenshot(page, "emargement_echec")
+                    return False
 
             except Exception as e:
                 logger.error(f"Erreur durant l'émargement : {e}")
