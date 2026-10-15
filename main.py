@@ -29,14 +29,15 @@ def main():
 
     while True:
         try:
-            code = watcher.check_for_code()
+            code = watcher.check_for_code(auto_mark=False)
             if code:
-                logger.info(f"==> Nouveau code reçu : {code}")
+                logger.info(f"==> Nouveau code reçu ({watcher.last_detected_date}) : {code}")
                 success = signer.sign(code)
                 if success:
                     logger.info(f"==> Émargement réussi pour le code {code}")
+                    watcher.mark_as_processed(code, watcher.last_detected_date)
                 else:
-                    logger.error(f"==> Échec de l'émargement pour le code {code}")
+                    logger.error(f"==> Échec de l'émargement pour le code {code} - nouvelle tentative au prochain cycle")
 
             time.sleep(config.POLL_INTERVAL)
         except KeyboardInterrupt:

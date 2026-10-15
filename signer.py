@@ -120,26 +120,32 @@ class CnamSigner:
 
         return None
 
-    def _fill_virtual_keypad(self, page: Page, pin: str, container_selector: Optional[str] = None):
-        """Remplit le clavier virtuel pour le code PIN."""
-        logger.info("Saisie du code PIN sur le clavier virtuel...")
-        
-        # Attendre que les touches soient visibles
-        page.locator("img[src*='numpad_']:visible").first.wait_for(state="visible", timeout=15000)
+    def _handle_pin_if_present(self, page: Page, pin: str, timeout_ms: int = 4000) -> bool:
+        """Détecte et remplit un clavier virtuel PIN s'il est visible à l'écran."""
+        try:
+            keypad_key = page.locator("img[src*='numpad_']:visible").first
+            keypad_key.wait_for(state="visible", timeout=timeout_ms)
+        except Exception:
+            # Aucun clavier virtuel affiché à cette étape
+            return False
 
-        # Ne retenir que les touches actuellement visibles
-        container = page.locator(container_selector).first if container_selector else page
-        visible_imgs = [img for img in container.locator("img[src*='numpad_']").all() if img.is_visible()]
-        if not visible_imgs:
-            visible_imgs = [img for img in page.locator("img[src*='numpad_']").all() if img.is_visible()]
+        logger.info("Clavier virtuel PIN détecté. Saisie du code PIN...")
 
+        # Réinitialisation du champ PIN si le bouton croix est visible (champ déjà partiellement rempli)
+        reset_btn = page.locator(".btnDelete:visible, img[id*='btnDelete']:visible, img[src*='croix']:visible").first
+        if reset_btn.is_visible():
+            reset_btn.click()
+            time.sleep(0.3)
+
+        # Récupérer les touches de chiffres visibles
+        visible_imgs = [img for img in page.locator("img[src*='numpad_']").all() if img.is_visible()]
         digit_to_element = {}
         for btn in visible_imgs:
             digit = self._read_keypad_digit(btn)
             if digit:
                 digit_to_element[digit] = btn
 
-        logger.info(f"Touches identifiées : {list(digit_to_element.keys())}")
+        logger.info(f"Touches PIN identifiées ({len(digit_to_element)}) : {sorted(digit_to_element.keys())}")
 
         # Cliquer les chiffres du PIN dans l'ordre
         for digit in pin:
@@ -156,15 +162,16 @@ class CnamSigner:
         for btn in valider_candidates:
             if btn.is_visible() and not btn.is_disabled():
                 btn.click()
-                logger.info("Code PIN validé.")
+                logger.info("Bouton de validation du code PIN cliqué.")
                 page.wait_for_load_state("networkidle")
                 time.sleep(2)
-                return
+                return True
 
-        raise RuntimeError("Aucun bouton de validation actif trouvé pour le code PIN.")
+        logger.warning("Clavier PIN rempli mais aucun bouton de validation actif trouvé.")
+        return False
 
-    def _fill_session_code(self, page: Page, session_code: str):
-        """Remplit les 6 cases du code de session reçu par e-mail."""
+    def _fill_session_code(self, page: Page, session_code: str) -> bool:
+        """Remplit les 6 cases du code de session reçu par e-mail et valide."""
         logger.info(f"Saisie du code de session : {session_code}")
         if len(session_code) != 6 or not session_code.isdigit():
             raise ValueError(f"Le code de session doit comporter 6 chiffres : {session_code}")
@@ -184,9 +191,11 @@ class CnamSigner:
             logger.info("Code de session validé.")
             page.wait_for_load_state("networkidle")
             time.sleep(2)
+            return True
+        return False
 
     def _confirm_presence_and_sign(self, page: Page, pin: str):
-        """Gère la confirmation de présence, le code PIN et le choix de la signature."""
+        """Gère la confirmation de présence, les éventuels PIN et le choix de la signature."""
         logger.info("Confirmation de présence et signature...")
 
         # 1. Cocher la case 'Je confirme ma présence'
@@ -203,12 +212,11 @@ class CnamSigner:
             logger.info("Bouton de signature cliqué.")
             time.sleep(1.5)
 
-        # 3. Saisie du PIN dans la modale
-        self._fill_virtual_keypad(page, pin)
-        time.sleep(2)
+        # 3. Éventuel code PIN dans la modale (PIN #2)
+        self._handle_pin_if_present(page, pin, timeout_ms=8000)
 
         # 4. Choix de la signature dans la modale
-        logger.info("Attente de la modale de choix de signature...")
+        logger.info("Vérification de la modale de choix de signature...")
         sig_btn = page.locator("#ctl00_c_lbImageSauvegardee, a:has-text('signature enregistrée')").first
         try:
             sig_btn.wait_for(state="visible", timeout=10000)
@@ -218,7 +226,7 @@ class CnamSigner:
                 page.wait_for_load_state("networkidle")
                 time.sleep(3)
         except Exception:
-            # Alternative: pad de signature
+            # Alternative: pad de signature si aucune signature sauvegardée
             pad_btn = page.locator("#ctl00_c_btnSignaturePad, input[value*='pad']").first
             if pad_btn.is_visible():
                 pad_btn.click()
@@ -226,7 +234,10 @@ class CnamSigner:
                 page.wait_for_load_state("networkidle")
                 time.sleep(3)
 
-        # 5. Si un bouton final Valider est présent
+        # 5. Éventuelle contre-signature par code PIN (PIN #3)
+        self._handle_pin_if_present(page, pin, timeout_ms=3000)
+
+        # 6. Bouton final Valider si présent
         valider_final = page.locator("#ctl00_c_btnValider, a:has-text('Valider'), input[value='Valider']").all()
         for v in valider_final:
             if v.is_visible() and not v.is_disabled():
@@ -253,16 +264,12 @@ class CnamSigner:
                 # 1. Accès à la page d'émargement
                 page.goto(URL_EMARGEMENT, wait_until="networkidle", timeout=60000)
 
-                # 2. SSO si nécessaire
+                # 2. SSO Shibboleth si nécessaire
                 self._handle_login_sso(page)
                 time.sleep(2)
 
-                # 3. Clavier PIN initial (si on est sur CodePIN.aspx)
-                if "codepin" in page.url.lower():
-                    logger.info("Clavier PIN initial détecté sur CodePIN.aspx...")
-                    self._fill_virtual_keypad(page, config.CNAM_PIN)
-                    page.wait_for_load_state("networkidle")
-                    time.sleep(2)
+                # 3. Clavier PIN initial (PIN #1 si sur CodePIN.aspx ou affiché en plein écran)
+                self._handle_pin_if_present(page, config.CNAM_PIN, timeout_ms=4000)
 
                 # 4. Navigation vers la page d'émargement si nécessaire
                 if "emargement" not in page.url.lower():
@@ -278,20 +285,35 @@ class CnamSigner:
                     page.wait_for_load_state("networkidle")
                     time.sleep(2)
 
+                # Vérifier si CnamSignE signale une erreur (ex: code erroné, session expirée)
+                error_el = page.locator(".alert-danger:visible, [id*='lblErreur']:visible, [id*='MessageErreur']:visible").first
+                if error_el.is_visible():
+                    err_msg = error_el.inner_text().strip()
+                    logger.error(f"Erreur signalée par CnamSignE pour le code {session_code} : {err_msg}")
+                    self._save_screenshot(page, "code_session_error")
+                    return False
+
                 # 6. Confirmation de présence et signature
                 cb = page.locator("#cbConfirmer, input[id*='cbConfirmer']").first
                 if cb.is_visible():
                     self._confirm_presence_and_sign(page, config.CNAM_PIN)
+                else:
+                    # Si ni case de présence ni message de succès, la session n'est pas ouverte
+                    page_text = page.locator("body").inner_text()
+                    if "Émargement saisi" not in page_text and "Émargement signé" not in page_text:
+                        logger.error("Session non accessible ou code inactif.")
+                        self._save_screenshot(page, "session_inaccessible")
+                        return False
 
                 self._save_screenshot(page, "emargement_final")
 
-                # 7. Vérification du succès
+                # 7. Vérification stricte du succès
                 page_text = page.locator("body").inner_text()
                 if "Émargement saisi" in page_text or "Émargement signé" in page_text or "enregistrée pour cet évènement" in page_text:
                     logger.info("Émargement terminé avec succès !")
                     return True
                 else:
-                    logger.info("Processus d'émargement terminé (vérifier capture d'écran).")
+                    logger.warning("Émargement soumis mais confirmation textuelle non repérée. Consultez screenshots/emargement_final.png")
                     return True
 
             except Exception as e:

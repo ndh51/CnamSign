@@ -23,6 +23,7 @@ PROCESSED_CODES_FILE = "processed_codes.txt"
 class MailWatcher:
     def __init__(self):
         self.processed_codes: Set[str] = self._load_processed_codes()
+        self.last_detected_date: Optional[str] = None
 
     def _load_processed_codes(self) -> Set[str]:
         if os.path.exists(PROCESSED_CODES_FILE):
@@ -101,8 +102,8 @@ class MailWatcher:
         time.sleep(4)
         logger.info("Session Outlook active et enregistrée dans le profil persistant !")
 
-    def check_for_code(self) -> Optional[str]:
-        """Vérifie le dossier Emargements et extrait le dernier code reçu avec cache persistant."""
+    def check_for_code(self, auto_mark: bool = False, max_mails_to_check: int = 5) -> Optional[str]:
+        """Vérifie les derniers messages du dossier Emargements et extrait le dernier code reçu."""
         with sync_playwright() as p:
             # Utilisation d'un profil navigateur persistant pour conserver cache, cookies et tokens
             context = p.chromium.launch_persistent_context(
@@ -137,31 +138,40 @@ class MailWatcher:
                     folder.click()
                     time.sleep(2)
 
-                # Vérifier le premier mail de la liste
-                first_mail = page.locator('div[role="listbox"] div[role="option"]').first
-                if not first_mail.is_visible():
+                # Vérifier les derniers mails de la liste
+                mails = page.locator('div[role="listbox"] div[role="option"]').all()[:max_mails_to_check]
+                if not mails:
                     logger.debug("Aucun mail dans le dossier Emargements.")
                     return None
 
-                first_mail.click()
-                time.sleep(1.5)
+                for idx, mail_item in enumerate(mails):
+                    try:
+                        if not mail_item.is_visible():
+                            continue
+                        mail_item.click()
+                        time.sleep(1)
 
-                # Extraire le corps du message
-                body_el = page.locator('div[aria-label="Corps du message"], div[role="document"], .ReadingPaneContainer').first
-                if not body_el.is_visible():
-                    return None
+                        # Extraire le corps du message
+                        body_el = page.locator('div[aria-label="Corps du message"], div[role="document"], .ReadingPaneContainer').first
+                        if not body_el.is_visible():
+                            continue
 
-                body_text = body_el.inner_text()
-                email_date = self.extract_date(body_text)
+                        body_text = body_el.inner_text()
+                        email_date = self.extract_date(body_text)
 
-                for pattern in CODE_PATTERNS:
-                    match = pattern.search(body_text)
-                    if match:
-                        code = match.group(1)
-                        if not self.is_processed(code, email_date):
-                            logger.info(f"Nouveau code d'émargement détecté pour le {email_date} : {code}")
-                            self.mark_as_processed(code, email_date)
-                            return code
+                        for pattern in CODE_PATTERNS:
+                            match = pattern.search(body_text)
+                            if match:
+                                code = match.group(1)
+                                if not self.is_processed(code, email_date):
+                                    logger.info(f"Nouveau code d'émargement détecté pour le {email_date} : {code} (mail #{idx+1})")
+                                    self.last_detected_date = email_date
+                                    if auto_mark:
+                                        self.mark_as_processed(code, email_date)
+                                    return code
+                    except Exception as err:
+                        logger.debug(f"Erreur lors de la lecture du mail #{idx+1} : {err}")
+                        continue
 
                 return None
 
