@@ -88,10 +88,12 @@ Pour construire et lancer le conteneur en tâche de fond :
 docker compose up -d --build
 ```
 
-Pour consulter les logs d'exécution :
+Pour consulter les logs d'exécution en direct :
 
 ```bash
-docker compose logs -f
+tail -f logs.txt
+# ou via Docker :
+docker compose logs -f --tail 50
 ```
 
 Pour arrêter le conteneur :

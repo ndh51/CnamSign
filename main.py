@@ -1,4 +1,5 @@
-import logging
+from logging.handlers import RotatingFileHandler
+import os
 import sys
 import time
 
@@ -6,11 +7,16 @@ import config
 from mail_watcher import MailWatcher
 from signer import CnamSigner
 
+LOG_FILE = "logs.txt"
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%H:%M:%S",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        RotatingFileHandler(LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=2, encoding="utf-8"),
+    ],
 )
 logger = logging.getLogger("cnamsign")
 

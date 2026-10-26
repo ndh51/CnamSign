@@ -26,6 +26,8 @@ wheels/
 # Playwright / Screenshots / Logs / Sessions
 screenshots/
 logs/
+logs.txt
+*.log
 .playwright/
 browser_profile/
 processed_codes.txt
