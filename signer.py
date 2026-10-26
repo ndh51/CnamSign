@@ -1,5 +1,6 @@
 import io
 import logging
+import math
 import os
 import re
 import time
@@ -213,54 +214,111 @@ class CnamSigner:
             time.sleep(1.5)
 
         # 3. Éventuel code PIN dans la modale (PIN #2)
-        self._handle_pin_if_present(page, pin, timeout_ms=8000)
+        self._handle_pin_if_present(page, pin, timeout_ms=6000)
 
         # 4. Choix de la signature dans la modale
         logger.info("Vérification de la modale de choix de signature...")
-        sig_btn = page.locator("#ctl00_c_lbImageSauvegardee, a:has-text('signature enregistrée')").first
+        saved_sig_selected = False
+
+        # Attendre l'apparition du conteneur de choix de signature ou des options
         try:
-            sig_btn.wait_for(state="visible", timeout=12000)
-            if sig_btn.is_visible():
-                sig_btn.click()
-                logger.info("Option 'Utiliser la signature enregistrée' sélectionnée.")
-                page.wait_for_load_state("networkidle")
-                time.sleep(3)
-                return
+            page.wait_for_selector(
+                "#divChoixSignature, #ctl00_c_lbImageSauvegardee, .imgSauvegardee, .txtImageSauvegardee, #ctl00_c_btnSignaturePad",
+                state="attached",
+                timeout=10000
+            )
         except Exception:
             pass
 
-        # Alternative: pad de signature si aucune signature sauvegardée
-        pad_btn = page.locator("#ctl00_c_btnSignaturePad, input[value*='pad']").first
-        if pad_btn.is_visible():
-            pad_btn.click()
-            logger.info("Option 'Signer avec le pad' sélectionnée.")
+        # Tentative 1 : Clic direct sur l'élément de la signature sauvegardée (tolérant encodage & structure DOM)
+        sig_targets = [
+            ".imgSauvegardee",
+            ".txtImageSauvegardee",
+            "#ctl00_c_lbImageSauvegardee",
+            "a[onclick*='SelectSignatureEnregistree']",
+            "p:has-text('signature')",
+            "#ctl00_c_imgSauvegardee",
+        ]
+        for sel in sig_targets:
+            loc = page.locator(sel).first
+            try:
+                if loc.count() > 0 and loc.is_visible():
+                    loc.click(force=True, timeout=3000)
+                    logger.info(f"Option 'Utiliser la signature enregistrée' sélectionnée (via {sel}).")
+                    saved_sig_selected = True
+                    break
+            except Exception:
+                continue
+
+        # Tentative 2 : Déclenchement JS direct (SelectSignatureEnregistree)
+        if not saved_sig_selected:
+            try:
+                js_ok = page.evaluate("""() => {
+                    if (typeof SelectSignatureEnregistree === 'function') {
+                        SelectSignatureEnregistree();
+                        return true;
+                    }
+                    const btn = document.getElementById('ctl00_c_lbImageSauvegardee') || document.querySelector('.imgSauvegardee');
+                    if (btn) {
+                        btn.click();
+                        return true;
+                    }
+                    return false;
+                }""")
+                if js_ok:
+                    logger.info("Option 'Utiliser la signature enregistrée' déclenchée via JavaScript.")
+                    saved_sig_selected = True
+            except Exception as e:
+                logger.debug(f"Échec JS signature enregistrée: {e}")
+
+        if saved_sig_selected:
             page.wait_for_load_state("networkidle")
             time.sleep(2)
-            try:
-                canvas = page.locator("canvas, #signature-pad canvas").first
-                if canvas.is_visible():
-                    box = canvas.bounding_box()
-                    if box:
-                        page.mouse.move(box["x"] + box["width"] * 0.2, box["y"] + box["height"] * 0.5)
-                        page.mouse.down()
-                        page.mouse.move(box["x"] + box["width"] * 0.8, box["y"] + box["height"] * 0.5, steps=5)
-                        page.mouse.up()
-                        time.sleep(1)
-            except Exception:
-                pass
-
-        # 5. Éventuelle contre-signature par code PIN (PIN #3)
-        self._handle_pin_if_present(page, pin, timeout_ms=3000)
-
-        # 6. Bouton final Valider si présent
-        valider_final = page.locator("#ctl00_c_btnValider, a:has-text('Valider'), input[value='Valider']").all()
-        for v in valider_final:
-            if v.is_visible() and not v.is_disabled():
-                v.click()
-                logger.info("Validation finale effectuée.")
+        else:
+            # Repli sur le pad uniquement si aucune signature enregistrée n'est trouvée
+            logger.warning("Signature enregistrée non disponible, tentative avec le pad...")
+            pad_btn = page.locator("#ctl00_c_btnSignaturePad, input[value*='pad']").first
+            if pad_btn.is_visible():
+                pad_btn.click()
+                logger.info("Option 'Signer avec le pad' sélectionnée.")
                 page.wait_for_load_state("networkidle")
                 time.sleep(2)
-                break
+                try:
+                    canvas = page.locator("canvas, #signature-pad canvas").first
+                    if canvas.is_visible():
+                        box = canvas.bounding_box()
+                        if box:
+                            # Tracé naturel courbé plutôt qu'un trait horizontal géométrique
+                            cx, cy = box["x"] + box["width"] * 0.3, box["y"] + box["height"] * 0.5
+                            page.mouse.move(cx, cy)
+                            page.mouse.down()
+                            for step in range(1, 15):
+                                nx = cx + (box["width"] * 0.4) * (step / 15.0)
+                                ny = cy + 10 * math.sin(step * 0.5)
+                                page.mouse.move(nx, ny)
+                            page.mouse.up()
+                            time.sleep(1)
+                except Exception:
+                    pass
+
+        # 5. Éventuelle contre-signature par code PIN (PIN #3)
+        self._handle_pin_if_present(page, pin, timeout_ms=4000)
+
+        # 6. Bouton final Valider si présent
+        valider_final = page.locator("#ctl00_c_btnValider, a:has-text('Valider'), input[value='Valider'], button:has-text('Valider')").all()
+        for v in valider_final:
+            try:
+                if v.is_visible() and not v.is_disabled():
+                    v.click()
+                    logger.info("Validation finale effectuée.")
+                    page.wait_for_load_state("networkidle")
+                    time.sleep(2)
+                    break
+            except Exception:
+                continue
+
+        # 7. Deuxième vérification PIN si demandé après validation
+        self._handle_pin_if_present(page, pin, timeout_ms=3000)
 
     def sign(self, session_code: str) -> bool:
         """Exécute le parcours complet d'émargement."""
@@ -324,7 +382,9 @@ class CnamSigner:
                 else:
                     # Si ni case de présence ni message de succès, la session n'est pas ouverte
                     page_text = page.locator("body").inner_text()
-                    if "Émargement saisi" not in page_text and "Émargement signé" not in page_text and "déjà émargé" not in page_text.lower():
+                    page_text_lower = page_text.lower()
+                    success_keywords = ["émargement saisi", "emargement saisi", "émargement signé", "emargement signe", "enregistrée pour cet", "enregistree pour cet", "déjà émargé", "deja emarge"]
+                    if not any(kw in page_text_lower for kw in success_keywords):
                         logger.error("Session non accessible ou code inactif.")
                         self._save_screenshot(page, "session_inaccessible")
                         return False
@@ -338,7 +398,9 @@ class CnamSigner:
                     self._save_screenshot(page, "signature_non_detectee")
                     return False
 
-                if "Émargement saisi" in page_text or "Émargement signé" in page_text or "enregistrée pour cet évènement" in page_text or "déjà émargé" in page_text.lower():
+                page_text_lower = page_text.lower()
+                success_keywords = ["émargement saisi", "emargement saisi", "émargement signé", "emargement signe", "enregistrée pour cet", "enregistree pour cet", "déjà émargé", "deja emarge"]
+                if any(kw in page_text_lower for kw in success_keywords):
                     logger.info("Émargement terminé avec succès !")
                     return True
                 else:
