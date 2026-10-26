@@ -265,6 +265,8 @@ class CnamSigner:
     def sign(self, session_code: str) -> bool:
         """Exécute le parcours complet d'émargement."""
         logger.info(f"Début du processus d'émargement avec le code {session_code}")
+        from mail_watcher import clean_browser_locks
+        clean_browser_locks()
         with sync_playwright() as p:
             context = p.chromium.launch_persistent_context(
                 user_data_dir=BROWSER_PROFILE_DIR,

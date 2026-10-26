@@ -3,6 +3,7 @@ services:
     build: .
     container_name: cnamsign
     restart: unless-stopped
+    init: true
     env_file:
       - .env
     shm_size: 1gb

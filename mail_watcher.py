@@ -20,10 +20,57 @@ CODE_PATTERNS = [
 BROWSER_PROFILE_DIR = os.path.abspath("browser_profile")
 PROCESSED_CODES_FILE = "processed_codes.txt"
 
+def clean_browser_locks():
+    """Supprime les verrous orphelins de Chromium pour eviter les blocages de profil."""
+    if os.path.exists(BROWSER_PROFILE_DIR):
+        for lock in ["SingletonLock", "SingletonCookie", "SingletonSocket"]:
+            p = os.path.join(BROWSER_PROFILE_DIR, lock)
+            if os.path.lexists(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+
+def clean_browser_cache():
+    """Purge les caches lourds tout en preservant cookies et sessions."""
+    if os.path.exists(BROWSER_PROFILE_DIR):
+        for cdir in [
+            os.path.join(BROWSER_PROFILE_DIR, "Default", "Cache"),
+            os.path.join(BROWSER_PROFILE_DIR, "Default", "Code Cache"),
+            os.path.join(BROWSER_PROFILE_DIR, "Crashpad"),
+        ]:
+            if os.path.exists(cdir):
+                try:
+                    import shutil
+                    shutil.rmtree(cdir, ignore_errors=True)
+                except Exception:
+                    pass
+
+class TimeoutWatchdog:
+    """Watchdog anti-blocage pour interrompre toute operation qui depasse le delai imparti."""
+    def __init__(self, seconds: int = 75):
+        self.seconds = seconds
+
+    def __enter__(self):
+        import signal
+        if hasattr(signal, "SIGALRM"):
+            signal.signal(signal.SIGALRM, self._handle_timeout)
+            signal.alarm(self.seconds)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        import signal
+        if hasattr(signal, "SIGALRM"):
+            signal.alarm(0)
+
+    def _handle_timeout(self, signum, frame):
+        raise TimeoutError(f"Watchdog: cycle de verification depasse (> {self.seconds}s)")
+
 class MailWatcher:
     def __init__(self):
         self.processed_codes: Set[str] = self._load_processed_codes()
         self.last_detected_date: Optional[str] = None
+        self._check_count = 0
 
     def _load_processed_codes(self) -> Set[str]:
         if os.path.exists(PROCESSED_CODES_FILE):
@@ -141,97 +188,114 @@ class MailWatcher:
 
     def check_for_code(self, auto_mark: bool = False, max_mails_to_check: int = 5) -> Optional[str]:
         """Vérifie les derniers messages du dossier Emargements et extrait le dernier code reçu."""
-        with sync_playwright() as p:
-            # Utilisation d'un profil navigateur persistant pour conserver cache, cookies et tokens
-            context = p.chromium.launch_persistent_context(
-                user_data_dir=BROWSER_PROFILE_DIR,
-                headless=config.HEADLESS,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 800}
-            )
-            page = context.pages[0] if context.pages else context.new_page()
+        self._check_count += 1
+        clean_browser_locks()
+        if self._check_count % 100 == 0:
+            clean_browser_cache()
 
-            try:
-                page.goto("https://outlook.office.com/mail/", timeout=60000)
+        try:
+            with TimeoutWatchdog(seconds=75):
+                with sync_playwright() as p:
+                    # Utilisation d'un profil navigateur persistant pour conserver cache, cookies et tokens
+                    context = p.chromium.launch_persistent_context(
+                        user_data_dir=BROWSER_PROFILE_DIR,
+                        headless=config.HEADLESS,
+                        args=["--no-sandbox", "--disable-dev-shm-usage"],
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        viewport={"width": 1280, "height": 800}
+                    )
+                    page = context.pages[0] if context.pages else context.new_page()
 
-                # Si le cache a expiré ou première visite, on s'authentifie
-                needs_login = False
-                try:
-                    login_field = page.wait_for_selector('input[type="email"], input[name="loginfmt"]', timeout=5000)
-                    if login_field:
-                        needs_login = True
-                except Exception:
-                    pass
-
-                if needs_login:
-                    self._login_outlook(page)
-
-                # Accès direct au dossier d'émargement
-                folder_name = config.OUTLOOK_FOLDER
-                folder_sel = f'span[title="{folder_name}"], div[title="{folder_name}"], span:text-is("{folder_name}"), [aria-label*="{folder_name}"]'
-                folder = page.locator(folder_sel).first
-                if folder.is_visible():
-                    folder.click()
-                    time.sleep(2)
-
-                # Vérifier les derniers mails de la liste
-                mails = page.locator('div[role="listbox"] div[role="option"]').all()[:max_mails_to_check]
-                if not mails:
-                    logger.debug("Aucun mail dans le dossier Emargements.")
-                    return None
-
-                today_str = datetime.now().strftime("%Y-%m-%d")
-
-                for idx, mail_item in enumerate(mails):
                     try:
-                        if not mail_item.is_visible():
-                            continue
+                        page.goto("https://outlook.office.com/mail/", timeout=60000)
 
-                        item_text = mail_item.inner_text().replace("\n", " ")
-                        mail_item.click()
-                        time.sleep(1)
+                        # Si le cache a expiré ou première visite, on s'authentifie
+                        needs_login = False
+                        try:
+                            login_field = page.wait_for_selector('input[type="email"], input[name="loginfmt"]', timeout=5000)
+                            if login_field:
+                                needs_login = True
+                        except Exception:
+                            pass
 
-                        # Extraire le conteneur complet de lecture (entête + corps)
-                        pane_el = page.locator('.ReadingPaneContainer, div[role="main"]').first
-                        pane_text = pane_el.inner_text() if pane_el.is_visible() else ""
+                        if needs_login:
+                            self._login_outlook(page)
 
-                        # Corps du message pour la recherche de code
-                        body_el = page.locator('div[aria-label="Corps du message"], div[role="document"]').first
-                        body_text = body_el.inner_text() if body_el.is_visible() else pane_text
+                        # Accès direct au dossier d'émargement
+                        folder_name = config.OUTLOOK_FOLDER
+                        folder_sel = f'span[title="{folder_name}"], div[title="{folder_name}"], span:text-is("{folder_name}"), [aria-label*="{folder_name}"]'
+                        folder = page.locator(folder_sel).first
+                        if folder.is_visible():
+                            folder.click()
+                            time.sleep(2)
 
-                        email_date = self.extract_date(pane_text, item_text)
+                        # Vérifier les derniers mails de la liste
+                        mails = page.locator('div[role="listbox"] div[role="option"]').all()[:max_mails_to_check]
+                        if not mails:
+                            logger.debug("Aucun mail dans le dossier Emargements.")
+                            return None
 
-                        for pattern in CODE_PATTERNS:
-                            match = pattern.search(body_text)
-                            if match:
-                                code = match.group(1)
+                        today_str = datetime.now().strftime("%Y-%m-%d")
 
-                                # Si déjà traité, passer au suivant
-                                if self.is_processed(code, email_date):
-                                    break
+                        for idx, mail_item in enumerate(mails):
+                            try:
+                                if not mail_item.is_visible():
+                                    continue
 
-                                # Si la date du mail est antérieure à aujourd'hui, on ignore discrètement
-                                if email_date < today_str:
-                                    logger.debug(
-                                        f"Code {code} du {email_date} (mail #{idx+1}) ignoré car antérieur à aujourd'hui ({today_str})."
-                                    )
-                                    self.mark_as_processed(code, email_date)
-                                    break
+                                item_text = mail_item.inner_text().replace("\n", " ")
+                                mail_item.click()
+                                time.sleep(1)
 
-                                logger.debug(f"Nouveau code d'émargement détecté pour le {email_date} : {code}")
-                                self.last_detected_date = email_date
-                                if auto_mark:
-                                    self.mark_as_processed(code, email_date)
-                                return code
-                    except Exception as err:
-                        logger.debug(f"Erreur lors de la lecture du mail #{idx+1} : {err}")
-                        continue
+                                # Extraire le conteneur complet de lecture (entête + corps)
+                                pane_el = page.locator('.ReadingPaneContainer, div[role="main"]').first
+                                pane_text = pane_el.inner_text() if pane_el.is_visible() else ""
 
-                return None
+                                # Corps du message pour la recherche de code
+                                body_el = page.locator('div[aria-label="Corps du message"], div[role="document"]').first
+                                body_text = body_el.inner_text() if body_el.is_visible() else pane_text
 
-            except Exception as e:
-                logger.error(f"Erreur lors de la vérification des mails Outlook Web : {e}")
-                return None
-            finally:
-                context.close()
+                                email_date = self.extract_date(pane_text, item_text)
+
+                                for pattern in CODE_PATTERNS:
+                                    match = pattern.search(body_text)
+                                    if match:
+                                        code = match.group(1)
+
+                                        # Si déjà traité, passer au suivant
+                                        if self.is_processed(code, email_date):
+                                            break
+
+                                        # Si la date du mail est antérieure à aujourd'hui, on ignore discrètement
+                                        if email_date < today_str:
+                                            logger.debug(
+                                                f"Code {code} du {email_date} (mail #{idx+1}) ignoré car antérieur à aujourd'hui ({today_str})."
+                                            )
+                                            self.mark_as_processed(code, email_date)
+                                            break
+
+                                        logger.debug(f"Nouveau code d'émargement détecté pour le {email_date} : {code}")
+                                        self.last_detected_date = email_date
+                                        if auto_mark:
+                                            self.mark_as_processed(code, email_date)
+                                        return code
+                            except Exception as err:
+                                logger.debug(f"Erreur lors de la lecture du mail #{idx+1} : {err}")
+                                continue
+
+                        return None
+
+                    except Exception as e:
+                        logger.error(f"Erreur lors de la vérification des mails Outlook Web : {e}")
+                        return None
+                    finally:
+                        try:
+                            context.close()
+                        except Exception:
+                            pass
+        except TimeoutError as te:
+            logger.error(f"{te} - passage au cycle suivant.")
+            clean_browser_locks()
+            return None
+        except Exception as e:
+            logger.error(f"Erreur globale lors de la vérification des mails : {e}")
+            return None
