@@ -89,11 +89,14 @@ Le service peut notifier en direct un salon Discord à chaque détection d'émar
    *(Si `DISCORD_WEBHOOK_URL` est vide, les notifications sont désactivées sans impacter le service).*
 4. **Tester l'envoi** :
    ```bash
-   # Test de confirmation de succès :
-   python tests/test_discord.py
+   # Via Docker (sans installer de dépendances sur la machine hôte) :
+   docker compose run --rm cnamsign python tests/test_discord.py
 
    # Test d'alerte d'échec (avec mention / ping) :
-   python tests/test_discord.py error
+   docker compose run --rm cnamsign python tests/test_discord.py error
+
+   # Ou en local avec Python si installé :
+   python tests/test_discord.py
    ```
 
 ## Tests préalables
@@ -129,6 +132,24 @@ python tests/test_sign.py [CODE_6_CHIFFRES]
 
 ### 4. Tester la notification Discord
 Vérifie le bon fonctionnement du webhook et de la mention :
+
+Via Docker (recommandé si Python n'est pas installé sur la machine hôte / VM) :
+
+```bash
+# Test de notification de succès :
+docker compose run --rm cnamsign python tests/test_discord.py
+
+# Test d'alerte d'échec (avec mention) :
+docker compose run --rm cnamsign python tests/test_discord.py error
+```
+
+Si le conteneur `cnamsign` tourne déjà en tâche de fond :
+
+```bash
+docker compose exec cnamsign python tests/test_discord.py
+```
+
+Ou en local avec Python :
 
 ```bash
 python tests/test_discord.py
@@ -166,4 +187,3 @@ Copyright (C) 2026 ndh51.
 Vous êtes libre d'utiliser, de modifier et de redistribuer ce logiciel, sous réserve de :
 - Conserver la mention de copyright et citer l'auteur original (`ndh51`).
 - Publier toute modification ou tout projet dérivé (fork) sous cette même licence GPL-3.0 (copyleft strict).
-
