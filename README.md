@@ -6,12 +6,19 @@ Automatisation de l'émargement sur la plateforme CnamSignE à partir des codes 
 
 ### 1. Boîte de réception Outlook
 
-Dans Outlook Web (outlook.office.com) :
+Dans Outlook Web ([outlook.office.com](https://outlook.office.com)) :
 
 1. Créer un sous-dossier nommé `Emargements` (sans accent, E majuscule et s à la fin).
-2. Créer une règle de boîte de réception :
-   - Condition : l'objet contient `émarger` ou `code de session`
-   - Action : déplacer le message vers le dossier `Emargements`
+2. Créer une règle de boîte de réception (Paramètres > Courrier > Règles > *Ajouter une nouvelle règle*) :
+   - **Nom de la règle** : `Emargements`
+   - **Conditions** :
+     - **De** : `No-reply IDS`
+     - **L'objet contient** : `Emargement`
+   - **Action** :
+     - **Déplacer vers** : le dossier `Emargements`
+   - **Options** : cocher *Ne plus traiter de règles*
+
+![Configuration de la règle Outlook](docs/images/regle_outlook.png)
 
 Si un autre nom de dossier est utilisé, il suffit de le renseigner dans la variable `OUTLOOK_FOLDER` du fichier `.env`.
 

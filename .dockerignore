@@ -8,3 +8,4 @@ __pycache__/
 *.pyd
 *.log
 processed_codes.txt
+docs/
