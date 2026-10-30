@@ -70,6 +70,7 @@ class MailWatcher:
     def __init__(self):
         self.processed_codes: Set[str] = self._load_processed_codes()
         self.last_detected_date: Optional[str] = None
+        self.last_detected_subject: Optional[str] = None
         self._check_count = 0
 
     def _load_processed_codes(self) -> Set[str]:
@@ -124,6 +125,21 @@ class MailWatcher:
             return (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
         return today_str
+
+    @staticmethod
+    def extract_subject(text: str = "", item_text: str = "") -> str:
+        """Extrait l'intitulé de la matière ou du cours depuis le sujet du mail."""
+        combined = f"{item_text}\n{text}"
+        m = re.search(r"(?:[EÉ]margement)\s*[-:]?\s*([A-Za-z0-9_]+(?:\s*-\s*[^\n\r|]+)?)", combined, re.IGNORECASE)
+        if m:
+            subj = m.group(1).strip()
+            subj = re.split(r"\s*\|\s*|\s*\b\d{1,2}:\d{2}\b", subj)[0].strip()
+            if subj:
+                return subj
+        m = re.search(r"\b(US[A-Z0-9]{2,6}(?:\s*-\s*[^\n\r|]+)?)", combined)
+        if m:
+            return re.split(r"\s*\|\s*|\s*\b\d{1,2}:\d{2}\b", m.group(1).strip())[0].strip()
+        return "Émargement Cnam"
 
     def is_processed(self, code: str, date_str: str) -> bool:
         """Vérifie si la combinaison date+code (ou le code seul) a déjà été traitée."""
@@ -275,6 +291,7 @@ class MailWatcher:
 
                                         logger.debug(f"Nouveau code d'émargement détecté pour le {email_date} : {code}")
                                         self.last_detected_date = email_date
+                                        self.last_detected_subject = self.extract_subject(pane_text, item_text)
                                         if auto_mark:
                                             self.mark_as_processed(code, email_date)
                                         return code

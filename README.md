@@ -49,12 +49,20 @@ EMAIL=prenom.nom.auditeur@lecnam.net
 PASSWORD=mon_mot_de_passe
 PIN_CODE=1234
 OUTLOOK_FOLDER=Emargements
+
+# Notifications Discord (optionnel)
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+DISCORD_USER_ID=123456789012345678
+STUDENT_NAME=Nadhir HALES
 ```
 
 - `EMAIL` : adresse e-mail Le Cnam (commune à Outlook et CnamSignE).
 - `PASSWORD` : mot de passe du compte Le Cnam (SSO Shibboleth).
 - `PIN_CODE` : code PIN secret à saisir sur le clavier virtuel pour valider l'émargement.
 - `OUTLOOK_FOLDER` : nom du dossier dans lequel sont rangés les mails d'émargement.
+- `DISCORD_WEBHOOK_URL` *(optionnel)* : URL du webhook Discord pour recevoir un rapport à chaque émargement (succès ou échec).
+- `DISCORD_USER_ID` *(optionnel)* : ID Discord de l'élève pour être mentionné (@pseudo) lors des notifications.
+- `STUDENT_NAME` *(optionnel)* : Nom affiché dans le récapitulatif (si omis, déduit de l'adresse e-mail).
 
 ## Tests préalables
 
@@ -85,6 +93,13 @@ Ou en local avec Python :
 
 ```bash
 python tests/test_sign.py [CODE_6_CHIFFRES]
+```
+
+### 4. Tester la notification Discord
+Envoie une notification d'essai sur votre salon Discord pour valider le webhook et la mention :
+
+```bash
+python tests/test_discord.py
 ```
 
 ## Déploiement Docker

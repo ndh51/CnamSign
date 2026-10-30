@@ -7,6 +7,7 @@ import time
 import config
 from mail_watcher import MailWatcher
 from signer import CnamSigner
+from notifier import send_discord_notification
 
 LOG_FILE = "logs.txt"
 
@@ -40,13 +41,15 @@ def main():
         try:
             code = watcher.check_for_code(auto_mark=False)
             if code:
-                logger.info(f"==> Nouveau code trouvé ({watcher.last_detected_date}) : {code}")
+                subject = watcher.last_detected_subject or "Émargement Cnam"
+                logger.info(f"==> Nouveau code trouvé ({watcher.last_detected_date}) : {code} [{subject}]")
                 logger.info("==> Lancement du protocole de signature...")
                 success = signer.sign(code)
                 if success:
                     logger.info(f"==> Émargement réussi pour le code {code}")
                     watcher.mark_as_processed(code, watcher.last_detected_date)
                     failed_attempts.pop(code, None)
+                    send_discord_notification(status=True, subject=subject, code=code)
                 else:
                     attempts = failed_attempts.get(code, 0) + 1
                     failed_attempts[code] = attempts
@@ -57,6 +60,12 @@ def main():
                         )
                         watcher.mark_as_processed(code, watcher.last_detected_date)
                         failed_attempts.pop(code, None)
+                        send_discord_notification(
+                            status=False,
+                            subject=subject,
+                            code=code,
+                            error_message=f"Échec après {attempts} tentatives (session expirée ou code inactif)."
+                        )
                     else:
                         logger.error(
                             f"==> Échec de l'émargement pour le code {code} "

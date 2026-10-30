@@ -18,6 +18,11 @@ OUTLOOK_FOLDER = os.getenv("OUTLOOK_FOLDER", "Emargements")
 HEADLESS = os.getenv("HEADLESS", "true").lower() in ("true", "1", "yes")
 DEBUG_SCREENSHOTS = os.getenv("DEBUG_SCREENSHOTS", "false").lower() in ("true", "1", "yes")
 
+# Notifications Discord (optionnel)
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
+DISCORD_USER_ID = os.getenv("DISCORD_USER_ID", "").strip()
+STUDENT_NAME = os.getenv("STUDENT_NAME", "").strip()
+
 # Alias de compatibilité
 IMAP_USER = EMAIL
 IMAP_PASSWORD = PASSWORD
