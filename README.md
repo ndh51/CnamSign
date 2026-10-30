@@ -157,3 +157,13 @@ docker compose down
 ```
 
 Le profil navigateur (cookies, cache et tokens de session) est stocké localement dans `browser_profile/` pour éviter les ré-authentifications systématiques.
+
+## Licence
+
+Ce projet est distribué sous licence [GNU General Public License v3.0 (GPL-3.0)](LICENSE).  
+Copyright (C) 2026 ndh51.
+
+Vous êtes libre d'utiliser, de modifier et de redistribuer ce logiciel, sous réserve de :
+- Conserver la mention de copyright et citer l'auteur original (`ndh51`).
+- Publier toute modification ou tout projet dérivé (fork) sous cette même licence GPL-3.0 (copyleft strict).
+
