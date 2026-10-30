@@ -53,14 +53,14 @@ def send_discord_notification(
         fields.append({"name": "⚠️ Détail", "value": error_message, "inline": False})
 
     payload = {
-        "username": "CnamSign",
+        "username": "CnamSignSignSigner",
         "embeds": [
             {
                 "title": title,
                 "description": desc,
                 "color": color,
                 "fields": fields,
-                "footer": {"text": "CnamSign • Notification automatique"},
+                "footer": {"text": "CnamSignSignSigner • Notification automatique"},
                 "timestamp": datetime.utcnow().isoformat() + "Z"
             }
         ]
@@ -76,7 +76,7 @@ def send_discord_notification(
             data=data,
             headers={
                 "Content-Type": "application/json",
-                "User-Agent": "CnamSign/1.0"
+                "User-Agent": "CnamSignSignSigner/1.0"
             }
         )
         with urllib.request.urlopen(req, timeout=10) as resp:

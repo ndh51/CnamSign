@@ -75,7 +75,7 @@ Le service peut notifier en direct un salon Discord à chaque détection d'émar
 1. **Créer le Webhook sur Discord** :
    - Clic droit sur le salon Discord de votre choix > **Modifier le salon**.
    - Onglet **Intégrations** > **Webhooks** > **Nouveau webhook**.
-   - Nommez-le (ex: *CnamSign*) et cliquez sur **Copier l'URL du webhook**.
+   - Nommez-le (ex: *CnamSignSignSigner*) et cliquez sur **Copier l'URL du webhook**.
 2. **Récupérer votre identifiant Discord (pour le ping / mention)** :
    - Ouvrez les *Paramètres utilisateur* Discord (roue crantée en bas à gauche) > **Avancés**.
    - Activez le **Mode développeur**.
