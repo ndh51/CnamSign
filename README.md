@@ -64,6 +64,38 @@ STUDENT_NAME=Nadhir HALES
 - `DISCORD_USER_ID` *(optionnel)* : ID Discord de l'élève pour être mentionné (@pseudo) lors des notifications.
 - `STUDENT_NAME` *(optionnel)* : Nom affiché dans le récapitulatif (si omis, déduit de l'adresse e-mail).
 
+## Notifications Discord (Webhook)
+
+Le service peut notifier en direct un salon Discord à chaque détection d'émargement :
+- 🟢 **En cas de succès** : Confirmation que votre présence a été enregistrée (nom du cours, élève, code et heure).
+- 🔴 **En cas d'échec** : Alerte immédiate avec mention `@vous` pour vous prévenir d'aller émarger manuellement avant la fin du créneau.
+
+### Tutoriel de configuration :
+
+1. **Créer le Webhook sur Discord** :
+   - Clic droit sur le salon Discord de votre choix > **Modifier le salon**.
+   - Onglet **Intégrations** > **Webhooks** > **Nouveau webhook**.
+   - Nommez-le (ex: *CnamSign*) et cliquez sur **Copier l'URL du webhook**.
+2. **Récupérer votre identifiant Discord (pour le ping / mention)** :
+   - Ouvrez les *Paramètres utilisateur* Discord (roue crantée en bas à gauche) > **Avancés**.
+   - Activez le **Mode développeur**.
+   - Faites un clic droit sur votre profil Discord > **Copier l'identifiant d'utilisateur** (suite de chiffres).
+3. **Ajouter dans votre `.env`** :
+   ```env
+   DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+   DISCORD_USER_ID=123456789012345678
+   STUDENT_NAME=Nadhir HALES
+   ```
+   *(Si `DISCORD_WEBHOOK_URL` est vide, les notifications sont désactivées sans impacter le service).*
+4. **Tester l'envoi** :
+   ```bash
+   # Test de confirmation de succès :
+   python tests/test_discord.py
+
+   # Test d'alerte d'échec (avec mention / ping) :
+   python tests/test_discord.py error
+   ```
+
 ## Tests préalables
 
 Avant de lancer le démon en continu, des scripts situés dans `tests/` permettent de tester chaque étape indépendamment.
@@ -96,7 +128,7 @@ python tests/test_sign.py [CODE_6_CHIFFRES]
 ```
 
 ### 4. Tester la notification Discord
-Envoie une notification d'essai sur votre salon Discord pour valider le webhook et la mention :
+Vérifie le bon fonctionnement du webhook et de la mention :
 
 ```bash
 python tests/test_discord.py
